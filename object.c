@@ -185,7 +185,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     }
 
     if (rename(tmp_path, final_path) != 0) {
-        if (errno != EEXIST) {
+        if (errno != EEXIST && !object_exists(&id)) {
             unlink(tmp_path);
             free(full);
             return -1;
