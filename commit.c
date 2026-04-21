@@ -216,6 +216,7 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     free(raw);
     if (rc != 0) return -1;
 
-    (void)commit_id;
-    return -1;
+    if (head_update(&commit_id) != 0) return -1;
+    *commit_id_out = commit_id;
+    return 0;
 }
