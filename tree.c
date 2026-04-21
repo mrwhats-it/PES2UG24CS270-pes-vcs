@@ -187,7 +187,6 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
 
         size_t dir_len = (size_t)(slash - rest);
         if (dir_len == 0 || dir_len >= sizeof(tree.entries[0].name)) return -1;
-        if (tree.count >= MAX_TREE_ENTRIES) return -1;
 
         char dirname[256];
         memcpy(dirname, rest, dir_len);
@@ -201,6 +200,7 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
             }
         }
         if (seen) continue;
+        if (tree.count >= MAX_TREE_ENTRIES) return -1;
 
         char child_prefix[1024];
         int n = snprintf(child_prefix, sizeof(child_prefix), "%s%s/", prefix, dirname);
