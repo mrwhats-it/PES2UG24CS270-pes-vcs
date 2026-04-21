@@ -172,15 +172,38 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
 
         const char *rest = ie->path + prefix_len;
         if (*rest == '\0') continue;
-        if (strchr(rest, '/') != NULL) continue;
 
-        if (strlen(rest) >= sizeof(tree.entries[0].name)) return -1;
+        const char *slash = strchr(rest, '/');
+        if (!slash) {
+            if (strlen(rest) >= sizeof(tree.entries[0].name)) return -1;
+            if (tree.count >= MAX_TREE_ENTRIES) return -1;
+
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = ie->mode;
+            te->hash = ie->hash;
+            snprintf(te->name, sizeof(te->name), "%s", rest);
+            continue;
+        }
+
+        size_t dir_len = (size_t)(slash - rest);
+        if (dir_len == 0 || dir_len >= sizeof(tree.entries[0].name)) return -1;
         if (tree.count >= MAX_TREE_ENTRIES) return -1;
 
+        char dirname[256];
+        memcpy(dirname, rest, dir_len);
+        dirname[dir_len] = '\0';
+
+        char child_prefix[1024];
+        int n = snprintf(child_prefix, sizeof(child_prefix), "%s%s/", prefix, dirname);
+        if (n < 0 || (size_t)n >= sizeof(child_prefix)) return -1;
+
+        ObjectID child_id;
+        if (write_tree_level(index, child_prefix, &child_id) != 0) return -1;
+
         TreeEntry *te = &tree.entries[tree.count++];
-        te->mode = ie->mode;
-        te->hash = ie->hash;
-        snprintf(te->name, sizeof(te->name), "%s", rest);
+        te->mode = MODE_DIR;
+        te->hash = child_id;
+        snprintf(te->name, sizeof(te->name), "%s", dirname);
     }
 
     void *raw = NULL;
