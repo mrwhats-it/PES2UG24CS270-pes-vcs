@@ -306,12 +306,13 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
         return -1;
     }
 
-    void *payload = malloc(payload_len);
-    if (!payload && payload_len > 0) {
+    uint8_t *payload = malloc(payload_len + 1);
+    if (!payload) {
         free(full);
         return -1;
     }
     if (payload_len > 0) memcpy(payload, nul + 1, payload_len);
+    payload[payload_len] = '\0';
 
     free(full);
     *type_out = parsed_type;
