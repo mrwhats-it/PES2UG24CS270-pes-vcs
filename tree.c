@@ -161,6 +161,37 @@ static int load_index_phase2(Index *index) {
     return 0;
 }
 
+static int write_tree_level(const Index *index, const char *prefix, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+    size_t prefix_len = strlen(prefix);
+
+    for (int i = 0; i < index->count; i++) {
+        const IndexEntry *ie = &index->entries[i];
+        if (strncmp(ie->path, prefix, prefix_len) != 0) continue;
+
+        const char *rest = ie->path + prefix_len;
+        if (*rest == '\0') continue;
+        if (strchr(rest, '/') != NULL) continue;
+
+        if (strlen(rest) >= sizeof(tree.entries[0].name)) return -1;
+        if (tree.count >= MAX_TREE_ENTRIES) return -1;
+
+        TreeEntry *te = &tree.entries[tree.count++];
+        te->mode = ie->mode;
+        te->hash = ie->hash;
+        snprintf(te->name, sizeof(te->name), "%s", rest);
+    }
+
+    void *raw = NULL;
+    size_t raw_len = 0;
+    if (tree_serialize(&tree, &raw, &raw_len) != 0) return -1;
+
+    int rc = object_write(OBJ_TREE, raw, raw_len, id_out);
+    free(raw);
+    return rc;
+}
+
 // Build a tree hierarchy from the current index and write all tree
 // objects to the object store.
 //
@@ -180,5 +211,5 @@ int tree_from_index(ObjectID *id_out) {
     Index index;
     if (load_index_phase2(&index) != 0) return -1;
 
-    return -1;
+    return write_tree_level(&index, "", id_out);
 }
