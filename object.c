@@ -222,7 +222,96 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    if (!id || !type_out || !data_out || !len_out) return -1;
+
+    char path[1024];
+    object_path(id, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    long fsize = ftell(f);
+    if (fsize < 0) {
+        fclose(f);
+        return -1;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return -1;
+    }
+
+    size_t total_len = (size_t)fsize;
+    uint8_t *full = malloc(total_len);
+    if (!full) {
+        fclose(f);
+        return -1;
+    }
+
+    if (total_len > 0 && fread(full, 1, total_len, f) != total_len) {
+        free(full);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    ObjectID computed;
+    compute_hash(full, total_len, &computed);
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(full);
+        return -1;
+    }
+
+    uint8_t *nul = memchr(full, '\0', total_len);
+    if (!nul) {
+        free(full);
+        return -1;
+    }
+
+    size_t header_len = (size_t)(nul - full);
+    char header[64];
+    if (header_len >= sizeof(header)) {
+        free(full);
+        return -1;
+    }
+    memcpy(header, full, header_len);
+    header[header_len] = '\0';
+
+    char type_str[16];
+    size_t declared_len = 0;
+    if (sscanf(header, "%15s %zu", type_str, &declared_len) != 2) {
+        free(full);
+        return -1;
+    }
+
+    ObjectType parsed_type;
+    if (strcmp(type_str, "blob") == 0) parsed_type = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) parsed_type = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) parsed_type = OBJ_COMMIT;
+    else {
+        free(full);
+        return -1;
+    }
+
+    size_t payload_len = total_len - (header_len + 1);
+    if (declared_len != payload_len) {
+        free(full);
+        return -1;
+    }
+
+    void *payload = malloc(payload_len);
+    if (!payload && payload_len > 0) {
+        free(full);
+        return -1;
+    }
+    if (payload_len > 0) memcpy(payload, nul + 1, payload_len);
+
+    free(full);
+    *type_out = parsed_type;
+    *data_out = payload;
+    *len_out = payload_len;
+    return 0;
 }
