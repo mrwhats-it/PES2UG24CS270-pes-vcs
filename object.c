@@ -61,6 +61,15 @@ int object_exists(const ObjectID *id) {
     return access(path, F_OK) == 0;
 }
 
+static const char *object_type_str(ObjectType type) {
+    switch (type) {
+        case OBJ_BLOB: return "blob";
+        case OBJ_TREE: return "tree";
+        case OBJ_COMMIT: return "commit";
+        default: return NULL;
+    }
+}
+
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
 // Write an object to the store.
@@ -95,13 +104,8 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    const char *type_str = NULL;
-    switch (type) {
-        case OBJ_BLOB: type_str = "blob"; break;
-        case OBJ_TREE: type_str = "tree"; break;
-        case OBJ_COMMIT: type_str = "commit"; break;
-        default: return -1;
-    }
+    const char *type_str = object_type_str(type);
+    if (!type_str) return -1;
 
     if (!id_out) return -1;
     if (len > 0 && !data) return -1;
