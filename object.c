@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <openssl/evp.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
@@ -94,9 +95,108 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
+    const char *type_str = NULL;
+    switch (type) {
+        case OBJ_BLOB: type_str = "blob"; break;
+        case OBJ_TREE: type_str = "tree"; break;
+        case OBJ_COMMIT: type_str = "commit"; break;
+        default: return -1;
+    }
+
+    if (!id_out) return -1;
+    if (len > 0 && !data) return -1;
+
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len);
+    if (header_len <= 0 || (size_t)header_len + 1 > sizeof(header)) return -1;
+    header[header_len] = '\0';
+    size_t full_len = (size_t)header_len + 1 + len;
+
+    uint8_t *full = malloc(full_len);
+    if (!full) return -1;
+    memcpy(full, header, (size_t)header_len + 1);
+    if (len > 0) memcpy(full + header_len + 1, data, len);
+
+    ObjectID id;
+    compute_hash(full, full_len, &id);
+    *id_out = id;
+
+    if (object_exists(&id)) {
+        free(full);
+        return 0;
+    }
+
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(&id, hex);
+
+    char shard_dir[1024];
+    int n = snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
+    if (n < 0 || (size_t)n >= sizeof(shard_dir)) {
+        free(full);
+        return -1;
+    }
+    if (mkdir(shard_dir, 0755) != 0 && errno != EEXIST) {
+        free(full);
+        return -1;
+    }
+
+    char final_path[1024];
+    object_path(&id, final_path, sizeof(final_path));
+
+    char tmp_path[1024];
+    n = snprintf(tmp_path, sizeof(tmp_path), "%s/.tmp-%d", shard_dir, getpid());
+    if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+        free(full);
+        return -1;
+    }
+
+    int fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        free(full);
+        return -1;
+    }
+
+    size_t written = 0;
+    while (written < full_len) {
+        ssize_t w = write(fd, full + written, full_len - written);
+        if (w < 0) {
+            close(fd);
+            unlink(tmp_path);
+            free(full);
+            return -1;
+        }
+        written += (size_t)w;
+    }
+
+    if (fsync(fd) != 0) {
+        close(fd);
+        unlink(tmp_path);
+        free(full);
+        return -1;
+    }
+    if (close(fd) != 0) {
+        unlink(tmp_path);
+        free(full);
+        return -1;
+    }
+
+    if (rename(tmp_path, final_path) != 0) {
+        if (errno != EEXIST) {
+            unlink(tmp_path);
+            free(full);
+            return -1;
+        }
+        unlink(tmp_path);
+    }
+
+    int dirfd = open(shard_dir, O_RDONLY | O_DIRECTORY);
+    if (dirfd >= 0) {
+        (void)fsync(dirfd);
+        close(dirfd);
+    }
+
+    free(full);
+    return 0;
 }
 
 // Read an object from the store.
